@@ -8,6 +8,10 @@ var indexRouter = require('./app_server/routes/index');
 var usersRouter = require('./app_server/routes/users');
 var travelRouter = require('./app_server/routes/travel'); // new router
 var handlebars = require('hbs'); // grab the hbs engine
+var apiRouter = require('./app_api/routes/index');   // API routes
+
+// Bring in the database
+require('./app_api/models/db');
 
 var app = express();
 
@@ -26,6 +30,8 @@ app.use(express.urlencoded({
 }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
+
+app.use('/api', apiRouter);
 
 app.use('/', indexRouter);
 app.use('/users', usersRouter);
