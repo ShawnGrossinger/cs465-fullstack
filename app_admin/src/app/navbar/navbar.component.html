@@ -1,0 +1,16 @@
+<nav class="navbar navbar-expand navbar-light bg-light mb-3">
+  <div class="container-fluid">
+    <a class="navbar-brand" routerLink=""><img src="assets/images/logo.png" alt="Travlr Getaways" height="50"></a>
+    <div class="navbar-nav">
+      <a class="nav-link active" routerLink="">Trips<span class="visually-hidden">(current)</span></a>
+    </div>
+    <div class="navbar-nav ms-auto">
+      <a class="nav-link" routerLink="login" *ngIf="!isLoggedIn()">
+        <span class="has-icon-left">Log In</span>
+      </a>
+      <a class="nav-link active" href="" (click)="onLogout(); $event.preventDefault()" *ngIf="isLoggedIn()">
+        <span class="has-icon-left">Log Out</span>
+      </a>
+    </div>
+  </div>
+</nav>
