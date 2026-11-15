@@ -1,9 +1,11 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
+import { HttpErrorResponse } from '@angular/common/http';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from "@angular/forms";
 import { TripDataService } from '../services/trip-data.service';
 import { Trip } from '../models/trip';
+import { describeApiError } from '../utils/api-error';
 
 @Component({
   selector: 'app-edit-trip',
@@ -16,30 +18,25 @@ export class EditTripComponent implements OnInit {
 
   public editForm!: FormGroup;
   trip!: Trip;
+  tripCode = '';
   submitted = false;
-  message : string = '';
+  message: string = '';
+  errorMessage: string = '';
 
   constructor(
     private formBuilder: FormBuilder,
     private router: Router,
+    private route: ActivatedRoute,
     private tripDataService: TripDataService
   ) {}
 
-  ngOnInit() : void {
-    // Retrieve stashed trip ID
-    let tripCode = localStorage.getItem("tripCode");
-    if (!tripCode) {
-      alert("Something wrong, couldn't find where I stashed tripCode!");
-      this.router.navigate(['']);
-      return;
-    }
-
-    console.log('EditTripComponent::ngOnInit');
-    console.log('tripcode:' + tripCode);
+  ngOnInit(): void {
+    // The trip code comes from the route (edit-trip/:tripCode). It used to be
+    // read from localStorage, which broke on refresh and across tabs.
+    this.tripCode = this.route.snapshot.paramMap.get('tripCode') ?? '';
 
     this.editForm = this.formBuilder.group({
-      _id: [],
-      code: [tripCode, Validators.required],
+      code: [this.tripCode, Validators.required],
       name: ['', Validators.required],
       length: ['', Validators.required],
       start: ['', Validators.required],
@@ -47,68 +44,58 @@ export class EditTripComponent implements OnInit {
       perPerson: ['', Validators.required],
       image: ['', Validators.required],
       description: ['', Validators.required]
-    })
+    });
 
-    this.tripDataService.getTrip(tripCode)
+    this.tripDataService.getTrip(this.tripCode)
       .subscribe({
-        next: (value: any) => {
-          if (!value || value.length === 0) {
-            this.message = 'No Trip Retrieved!';
-            console.log(this.message);
-            return;
-          }
-
-          this.trip = value[0];
+        next: (trip: Trip) => {
+          this.trip = trip;
           // Populate our record into the form
-          this.editForm.patchValue(value[0]);
+          this.editForm.patchValue(trip);
           // The date picker needs yyyy-MM-dd, but the database returns a full timestamp
-          this.editForm.patchValue({ start: String(value[0].start).substring(0, 10) });
-
-          this.message = 'Trip: ' + tripCode + ' retrieved';
-          console.log(this.message);
+          this.editForm.patchValue({ start: String(trip.start).substring(0, 10) });
+          this.message = `Trip: ${this.tripCode} retrieved`;
         },
-        error: (error: any) => {
-          console.log('Error: ' + error);
+        error: (error: unknown) => {
+          this.errorMessage = error instanceof HttpErrorResponse && error.status === 404
+            ? `Trip ${this.tripCode} was not found.`
+            : describeApiError(error);
         }
-      })
+      });
   }
 
-  public onSubmit()
-  {
+  public onSubmit() {
     this.submitted = true;
+    this.errorMessage = '';
 
-    if (this.editForm.valid)
-    {
-      this.tripDataService.updateTrip(this.editForm.value)
+    if (this.editForm.valid) {
+      this.tripDataService.updateTrip(this.tripCode, this.editForm.value)
         .subscribe({
-          next: (value: any) => {
-            console.log(value);
+          next: () => {
             this.router.navigate(['']);
           },
-          error: (error: any) => {
-            console.log('Error: ' + error);
+          error: (error: unknown) => {
+            this.errorMessage = describeApiError(error);
           }
-        })
+        });
     }
   }
 
-  public onDelete()
-  {
-    const tripCode = this.editForm.value.code;
-    if (!confirm('Delete trip ' + tripCode + '? This cannot be undone.')) {
+  public onDelete() {
+    if (!confirm('Delete trip ' + this.tripCode + '? This cannot be undone.')) {
       return;
     }
 
-    this.tripDataService.deleteTrip(tripCode)
+    this.errorMessage = '';
+    this.tripDataService.deleteTrip(this.tripCode)
       .subscribe({
-        next: (value: any) => {
-          console.log(value);
+        next: () => {
           this.router.navigate(['']);
         },
-        error: (error: any) => {
-          console.log('Error: ' + error);
+        error: (error: unknown) => {
+          this.errorMessage = describeApiError(error);
         }
-      })
+      });
   }
 
   // get the form short name to access the form fields

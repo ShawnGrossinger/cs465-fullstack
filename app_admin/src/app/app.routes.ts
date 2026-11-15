@@ -3,10 +3,14 @@ import { AddTripComponent } from './add-trip/add-trip.component';
 import { TripListingComponent } from './trip-listing/trip-listing.component';
 import { EditTripComponent } from './edit-trip/edit-trip.component';
 import { LoginComponent } from './login/login.component';
+import { adminGuard } from './utils/admin.guard';
 
 export const routes: Routes = [
-  { path: 'add-trip', component: AddTripComponent },
-  { path: 'edit-trip', component: EditTripComponent },
+  { path: 'add-trip', component: AddTripComponent, canActivate: [adminGuard] },
+  // The trip code is part of the URL (it used to be passed through localStorage),
+  // so edit pages can be bookmarked, refreshed, and opened in several tabs.
+  { path: 'edit-trip/:tripCode', component: EditTripComponent, canActivate: [adminGuard] },
   { path: 'login', component: LoginComponent },
-  { path: '', component: TripListingComponent, pathMatch: 'full' }
+  { path: '', component: TripListingComponent, pathMatch: 'full' },
+  { path: '**', redirectTo: '' }
 ];

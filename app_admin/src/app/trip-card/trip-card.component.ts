@@ -1,4 +1,4 @@
-import { Component, OnInit, Input } from '@angular/core';
+import { Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { Trip } from '../models/trip';
@@ -11,27 +11,23 @@ import { AuthenticationService } from '../services/authentication.service';
   templateUrl: './trip-card.component.html',
   styleUrl: './trip-card.component.css'
 })
-export class TripCardComponent implements OnInit {
+export class TripCardComponent {
 
-  @Input('trip') trip: any;
+  @Input('trip') trip!: Trip;
 
   constructor(
     private router: Router,
     private authenticationService: AuthenticationService
   ) {}
 
-  ngOnInit(): void {
-
+  // The trip code travels in the URL (edit-trip/GALR210214) instead of
+  // being stashed in localStorage for the next page to find.
+  public editTrip(trip: Trip): void {
+    this.router.navigate(['edit-trip', trip.code]);
   }
 
-  public editTrip(trip: Trip) {
-    localStorage.removeItem('tripCode');
-    localStorage.setItem('tripCode', trip.code);
-    this.router.navigate(['edit-trip']);
-  }
-
-  public isLoggedIn()
-  {
-    return this.authenticationService.isLoggedIn();
+  // Only administrators see the Edit button.
+  public isAdmin(): boolean {
+    return this.authenticationService.isAdmin();
   }
 }

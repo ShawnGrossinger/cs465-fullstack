@@ -9,9 +9,10 @@
     <p class="card-subtitle mt-3 mb-3 text-muted">
       {{trip.length}} only {{trip.perPerson|currency:'USD':'symbol'}} per person
     </p>
+    <!-- Angular sanitizes [innerHTML]; the API also sanitizes descriptions before saving them. -->
     <p class="card-text" [innerHTML]="trip.description">
     </p>
-    <div *ngIf="isLoggedIn()">
+    <div *ngIf="isAdmin()">
       <button (click)="editTrip(trip)" class="btn btn-info">Edit Trip</button>
     </div>
   </div>

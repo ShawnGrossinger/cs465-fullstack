@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from "@angular/forms";
 import { Router } from "@angular/router";
 import { TripDataService } from '../services/trip-data.service';
+import { describeApiError } from '../utils/api-error';
 
 @Component({
   selector: 'app-add-trip',
@@ -15,6 +16,7 @@ export class AddTripComponent implements OnInit {
 
   public addForm!: FormGroup;
   submitted = false;
+  errorMessage = '';
 
   constructor(
     private formBuilder: FormBuilder,
@@ -23,8 +25,9 @@ export class AddTripComponent implements OnInit {
   ) { }
 
   ngOnInit() {
+    // (The _id control was removed: the database assigns ids, and the API
+    // now discards any _id a client sends.)
     this.addForm = this.formBuilder.group({
-      _id: [],
       code: ['', Validators.required],
       name: ['', Validators.required],
       length: ['', Validators.required],
@@ -38,15 +41,17 @@ export class AddTripComponent implements OnInit {
 
   public onSubmit() {
     this.submitted = true;
+    this.errorMessage = '';
     if (this.addForm.valid) {
       this.tripService.addTrip(this.addForm.value)
         .subscribe({
-          next: (data: any) => {
-            console.log(data);
+          next: () => {
             this.router.navigate(['']);
           },
-          error: (error: any) => {
-            console.log('Error: ' + error);
+          // Show the API's explanation (for example, which field is invalid
+          // or that the trip code already exists) instead of only logging it.
+          error: (error: unknown) => {
+            this.errorMessage = describeApiError(error);
           }
         });
     }

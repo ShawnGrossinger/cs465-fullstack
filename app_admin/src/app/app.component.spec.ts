@@ -1,29 +1,27 @@
 import { TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { provideRouter } from '@angular/router';
 import { AppComponent } from './app.component';
+import { storageProvider } from './testing/test-helpers';
 
 describe('AppComponent', () => {
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [AppComponent],
+      providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting(), storageProvider()]
     }).compileComponents();
   });
 
   it('should create the app', () => {
     const fixture = TestBed.createComponent(AppComponent);
-    const app = fixture.componentInstance;
-    expect(app).toBeTruthy();
+    expect(fixture.componentInstance).toBeTruthy();
   });
 
-  it(`should have the 'travlr-admin' title`, () => {
-    const fixture = TestBed.createComponent(AppComponent);
-    const app = fixture.componentInstance;
-    expect(app.title).toEqual('travlr-admin');
-  });
-
-  it('should render title', () => {
+  it('shows the navigation bar with a Log In link when logged out', () => {
     const fixture = TestBed.createComponent(AppComponent);
     fixture.detectChanges();
-    const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('h1')?.textContent).toContain('Hello, travlr-admin');
+    const nav = (fixture.nativeElement as HTMLElement).querySelector('app-navbar');
+    expect(nav?.textContent).toContain('Log In');
   });
 });

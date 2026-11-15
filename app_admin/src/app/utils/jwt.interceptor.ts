@@ -1,41 +1,49 @@
 import { Injectable, Provider } from '@angular/core';
-import { HttpRequest, HttpHandler, HttpEvent } from '@angular/common/http';
+import { HttpRequest, HttpHandler, HttpEvent, HttpErrorResponse } from '@angular/common/http';
 import { HttpInterceptor, HTTP_INTERCEPTORS } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Router } from '@angular/router';
+import { Observable, catchError, throwError } from 'rxjs';
 import { AuthenticationService } from '../services/authentication.service';
+import { environment } from '../../environments/environment';
 
 @Injectable()
 export class JwtInterceptor implements HttpInterceptor {
 
+  private readonly apiPrefix = `${environment.apiBaseUrl}/`;
+
   constructor(
-    private authenticationService: AuthenticationService
+    private authenticationService: AuthenticationService,
+    private router: Router
   ) {}
 
-  intercept(request: HttpRequest<any>, next: HttpHandler): Observable<HttpEvent<any>> {
-    var isAuthAPI: boolean;
-    // console.log('Interceptor::URL' + request.url);
+  intercept(request: HttpRequest<unknown>, next: HttpHandler): Observable<HttpEvent<unknown>> {
+    // Only requests to our own API may carry the token. The original version
+    // attached it to every request, which would hand it to any other site the
+    // app ever called.
+    const isApi = request.url.startsWith(this.apiPrefix);
+    const isAuthApi = isApi &&
+      (request.url.endsWith('/login') || request.url.endsWith('/register'));
 
-    // request.url is the full address (http://localhost:3000/api/login),
-    // so check how it ends rather than how it starts
-    if (request.url.endsWith('/login') ||
-        request.url.endsWith('/register')) {
-      isAuthAPI = true;
-    }
-    else {
-      isAuthAPI = false;
-    }
-
-    if (this.authenticationService.isLoggedIn() && !isAuthAPI) {
-      let token = this.authenticationService.getToken();
-      // console.log(token);
-      const authReq = request.clone({
+    let outgoing = request;
+    if (isApi && !isAuthApi && this.authenticationService.isLoggedIn()) {
+      outgoing = request.clone({
         setHeaders: {
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${this.authenticationService.getToken()}`
         }
       });
-      return next.handle(authReq);
     }
-    return next.handle(request);
+
+    return next.handle(outgoing).pipe(
+      catchError((error: unknown) => {
+        // The API rejected our token (expired, or the account was removed):
+        // sign out and send the user to the login page instead of failing silently.
+        if (error instanceof HttpErrorResponse && error.status === 401 && isApi && !isAuthApi) {
+          this.authenticationService.logout();
+          this.router.navigate(['/login'], { queryParams: { reason: 'expired' } });
+        }
+        return throwError(() => error);
+      })
+    );
   }
 }
 

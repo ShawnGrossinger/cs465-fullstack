@@ -1,70 +1,68 @@
-import { Inject, Injectable } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
 import { Trip } from '../models/trip';
 import { User } from '../models/user';
 import { AuthResponse } from '../models/auth-response';
-import { BROWSER_STORAGE } from '../storage';
+import { environment } from '../../environments/environment';
 
 @Injectable({
   providedIn: 'root'
 })
 export class TripDataService {
 
-  baseUrl = 'http://localhost:3000/api';
-  url = 'http://localhost:3000/api/trips';
+  // The API address comes from the environment files instead of being
+  // hard-coded here, so a deployment only changes configuration.
+  readonly baseUrl = environment.apiBaseUrl;
+  private readonly tripsUrl = `${this.baseUrl}/trips`;
 
-  constructor(
-    private http: HttpClient,
-    @Inject(BROWSER_STORAGE) private storage: Storage
-  ) {}
+  constructor(private http: HttpClient) {}
 
-  getTrips() : Observable<Trip[]> {
-    // console.log('Inside TripDataService::getTrips');
-    return this.http.get<Trip[]>(this.url);
+  getTrips(): Observable<Trip[]> {
+    return this.http.get<Trip[]>(this.tripsUrl);
   }
 
-  addTrip(formData: Trip) : Observable<Trip> {
-    // console.log('Inside TripDataService::addTrip');
-    return this.http.post<Trip>(this.url, formData);
+  addTrip(formData: Trip): Observable<Trip> {
+    return this.http.post<Trip>(this.tripsUrl, formData);
   }
 
-  getTrip(tripCode: string) : Observable<Trip[]> {
-    // console.log('Inside TripDataService::getTrip');
-    return this.http.get<Trip[]>(this.url + '/' + tripCode);
+  // The API now returns a single trip object (it used to return an array).
+  getTrip(tripCode: string): Observable<Trip> {
+    return this.http.get<Trip>(this.tripUrl(tripCode));
   }
 
-  updateTrip(formData: Trip) : Observable<Trip> {
-    // console.log('Inside TripDataService::updateTrip');
-    return this.http.put<Trip>(this.url + '/' + formData.code, formData);
+  // The trip code is passed separately so the URL never depends on form data.
+  updateTrip(tripCode: string, formData: Trip): Observable<Trip> {
+    return this.http.put<Trip>(this.tripUrl(tripCode), formData);
   }
 
-  deleteTrip(tripCode: string) : Observable<Trip> {
-    // console.log('Inside TripDataService::deleteTrip');
-    return this.http.delete<Trip>(this.url + '/' + tripCode);
+  // The API answers 204 No Content.
+  deleteTrip(tripCode: string): Observable<void> {
+    return this.http.delete<void>(this.tripUrl(tripCode));
   }
 
   // Call to our /login endpoint, returns JWT
-  login(user: User, passwd: string) : Observable<AuthResponse> {
-    // console.log('Inside TripDataService::login');
+  login(user: User, passwd: string): Observable<AuthResponse> {
     return this.handleAuthAPICall('login', user, passwd);
   }
 
   // Call to our /register endpoint, creates user and returns JWT
-  register(user: User, passwd: string) : Observable<AuthResponse> {
-    // console.log('Inside TripDataService::register');
+  register(user: User, passwd: string): Observable<AuthResponse> {
     return this.handleAuthAPICall('register', user, passwd);
   }
 
   // helper method to process both login and register methods
-  handleAuthAPICall(endpoint: string, user: User, passwd: string) : Observable<AuthResponse> {
-    // console.log('Inside TripDataService::handleAuthAPICall');
-    let formData = {
+  handleAuthAPICall(endpoint: string, user: User, passwd: string): Observable<AuthResponse> {
+    const formData = {
       name: user.name,
       email: user.email,
       password: passwd
     };
-    return this.http.post<AuthResponse>(this.baseUrl + '/' + endpoint, formData);
+    return this.http.post<AuthResponse>(`${this.baseUrl}/${endpoint}`, formData);
+  }
+
+  private tripUrl(tripCode: string): string {
+    return `${this.tripsUrl}/${encodeURIComponent(tripCode)}`;
   }
 }
