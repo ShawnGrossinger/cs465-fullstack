@@ -1,81 +1,120 @@
-require('dotenv').config(); // Load JWT_SECRET from the .env file
+'use strict';
+/**
+ * Application assembly.
+ *
+ * createApp() wires the layers together (repositories -> services ->
+ * controllers -> routes) and applies the cross-cutting security middleware.
+ * Dependencies are passed in rather than required globally, which is what
+ * lets the test suite run the real application against in-memory
+ * repositories, and bin/www run it against MongoDB.
+ */
+const path = require('path');
+const express = require('express');
+const createError = require('http-errors');
+const logger = require('morgan');
+const hbs = require('hbs');
+const helmet = require('helmet');
+const cors = require('cors');
 
-var createError = require('http-errors');
-var express = require('express');
-var path = require('path');
-var cookieParser = require('cookie-parser');
-var logger = require('morgan');
+const { createPasswordService } = require('./app_api/services/passwordService');
+const { createTokenService } = require('./app_api/services/tokenService');
+const { createAuthService } = require('./app_api/services/authService');
+const { createTripService } = require('./app_api/services/tripService');
+const { createTripsController } = require('./app_api/controllers/trips');
+const { createAuthController } = require('./app_api/controllers/authentication');
+const { createAuthenticate, createRequireRole } = require('./app_api/middleware/auth');
+const { createAuthRateLimiters } = require('./app_api/middleware/rateLimiters');
+const { apiNotFound, createApiErrorHandler } = require('./app_api/middleware/errorHandler');
+const { createApiRouter } = require('./app_api/routes/index');
+const { createLogger } = require('./app_api/utils/logger');
+const { sanitizeDescription } = require('./app_api/utils/sanitize');
 
-var indexRouter = require('./app_server/routes/index');
-var usersRouter = require('./app_server/routes/users');
-var travelRouter = require('./app_server/routes/travel'); // new router
-var handlebars = require('hbs'); // grab the hbs engine
-var apiRouter = require('./app_api/routes/index');   // API routes
+const indexRouter = require('./app_server/routes/index');
+const { createTravelRouter } = require('./app_server/routes/travel');
+const { createApiTripsClient } = require('./app_server/clients/tripsClient');
 
-// Wire in our authentication module
-var passport = require('passport');
-require('./app_api/config/passport');
+// Handlebars setup is global to the hbs module, so it is done once.
+hbs.registerPartials(path.join(__dirname, 'app_server', 'views', 'partials'));
+// Trip descriptions are rendered through the same allowlist used when they are
+// saved, replacing the unescaped {{{this.description}}} in travel.hbs.
+hbs.registerHelper('safeDescription', (html) => new hbs.SafeString(sanitizeDescription(html)));
 
-// Bring in the database
-require('./app_api/models/db');
+/**
+ * @param {object} deps
+ * @param {object} deps.config        result of loadConfig()
+ * @param {object} deps.repositories  { trips, users } data-access objects
+ * @param {object} [deps.log]         structured logger (createLogger())
+ * @param {object} [deps.tripsClient] how the customer site fetches trips
+ */
+function createApp({ config, repositories, log = createLogger(), tripsClient } = {}) {
+    if (!config || !repositories) throw new Error('createApp requires config and repositories');
 
-var app = express();
+    // ----- Services -----
+    const passwordService = createPasswordService(config.passwords);
+    const tokenService = createTokenService(config.jwt);
+    const authService = createAuthService({
+        userRepository: repositories.users,
+        passwordService,
+        tokenService,
+        securityLog: log,
+    });
+    const tripService = createTripService({ tripRepository: repositories.trips });
 
-// view engine setup
-app.set('views', path.join(__dirname, 'app_server', 'views'));  // views moved to app server
+    const app = express();
 
-// register handlebars partials (https://www.npmjs.com/package/hbs)
-handlebars.registerPartials(__dirname + '/app_server/views/partials');  // tells hbs where partials are at
+    // ----- Views (customer site) -----
+    app.set('views', path.join(__dirname, 'app_server', 'views'));
+    app.set('view engine', 'hbs');
 
-app.set('view engine', 'hbs');
+    // ----- Cross-cutting middleware -----
+    app.use(helmet({
+        contentSecurityPolicy: {
+            directives: {
+                // Only force HTTPS sub-resources when actually deployed behind HTTPS.
+                upgradeInsecureRequests: config.isProduction ? [] : null,
+            },
+        },
+    }));
+    if (config.env !== 'test') app.use(logger('dev'));
+    app.use(express.json({ limit: '20kb' }));
+    app.use(express.urlencoded({ extended: false, limit: '20kb' }));
+    app.use(express.static(path.join(__dirname, 'public')));
 
-app.use(logger('dev'));
-app.use(express.json());
-app.use(express.urlencoded({
-  extended: false
-}));
-app.use(cookieParser());
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(passport.initialize());
+    // ----- REST API -----
+    app.use('/api', cors({
+        origin: config.corsOrigins,
+        methods: ['GET', 'POST', 'PUT', 'DELETE'],
+        allowedHeaders: ['Content-Type', 'Authorization'],
+        maxAge: 600,
+    }));
+    app.use('/api', createApiRouter({
+        tripsController: createTripsController(tripService),
+        authController: createAuthController(authService),
+        authenticate: createAuthenticate(tokenService),
+        requireRole: createRequireRole({ userRepository: repositories.users, securityLog: log }),
+        rateLimiters: createAuthRateLimiters(config.rateLimits, log),
+    }));
+    app.use('/api', apiNotFound);
+    app.use('/api', createApiErrorHandler(log));
 
-// Enable CORS so the Angular admin app (port 4200) can call the API
-app.use('/api', (req, res, next) => {
-  res.header('Access-Control-Allow-Origin', 'http://localhost:4200');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
-  next();
-});
+    // ----- Customer website -----
+    app.use('/', indexRouter);
+    app.use('/travel', createTravelRouter(tripsClient || createApiTripsClient(config.apiBaseUrl), log));
 
-app.use('/api', apiRouter);
+    app.use((req, res, next) => next(createError(404)));
 
-app.use('/', indexRouter);
-app.use('/users', usersRouter);
-app.use('/travel', travelRouter); // /travel handled by the travel router
+    // Website error page. Details are shown only in development.
+    // eslint-disable-next-line no-unused-vars
+    app.use((err, req, res, next) => {
+        const status = err.status || 500;
+        if (status >= 500) log.error('site.unhandled_error', { path: req.originalUrl, message: err.message });
+        res.locals.message = status < 500 ? err.message : 'Something went wrong';
+        res.locals.error = config.env === 'development' ? err : {};
+        res.status(status);
+        res.render('error');
+    });
 
-// Catch unauthorized error and create 401
-app.use((err, req, res, next) => {
-  if (err.name === 'UnauthorizedError') {
-    return res
-      .status(401)
-      .json({ "message": err.name + ": " + err.message });
-  }
-  next(err); // Pass every other error on to the handlers below
-});
+    return app;
+}
 
-// catch 404 and forward to error handler
-app.use(function(req, res, next) {
-  next(createError(404));
-});
-
-// error handler
-app.use(function(err, req, res, next) {
-  // set locals, only providing error in development
-  res.locals.message = err.message;
-  res.locals.error = req.app.get('env') === 'development' ? err : {};
-
-  // render the error page
-  res.status(err.status || 500);
-  res.render('error');
-});
-
-module.exports = app;
+module.exports = { createApp };

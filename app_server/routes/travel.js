@@ -1,8 +1,14 @@
 var express = require('express');
-var router = express.Router();
-var controller = require('../controllers/travel');
+var { createTravelController } = require('../controllers/travel');
 
-/* GET travel page */
-router.get('/', controller.travel);
+function createTravelRouter(tripsClient, log) {
+    var router = express.Router();
+    var controller = createTravelController(tripsClient, log);
 
-module.exports = router;
+    /* GET travel page */
+    router.get('/', controller.travel);
+
+    return router;
+}
+
+module.exports = { createTravelRouter };

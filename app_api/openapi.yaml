@@ -1,0 +1,297 @@
+openapi: 3.0.3
+info:
+  title: Travlr Getaways API
+  version: 2.0.0
+  description: |
+    REST API for the Travlr Getaways travel application. The customer website
+    and the Angular admin application both use it.
+
+    **Access rules**
+    - Reading trips is public.
+    - Creating, updating, and deleting trips requires a token from an
+      account with the `admin` role. Public registration creates `customer`
+      accounts only; administrators are created with `npm run create-admin`.
+
+    **Errors** always use the `Error` schema below, with a stable `code`
+    that clients can switch on.
+
+    **Changes from version 1 (CS 465)**
+    - `GET /trips/{tripCode}` returns a single trip object instead of a one-element array, and 404 when not found.
+    - `PUT /trips/{tripCode}` returns 200 with the updated trip (was 201 with the previous version).
+    - `DELETE /trips/{tripCode}` returns 204 with no body.
+    - `POST /register` returns 201 and always creates a customer.
+    - Trip writes require the admin role; unknown fields are discarded; descriptions are sanitized.
+servers:
+  - url: http://localhost:3000/api
+    description: Local development
+tags:
+  - name: Trips
+  - name: Authentication
+
+paths:
+  /trips:
+    get:
+      tags: [Trips]
+      summary: List all trips
+      operationId: listTrips
+      responses:
+        '200':
+          description: Every trip, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Trip' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [Trips]
+      summary: Create a trip (admin only)
+      operationId: createTrip
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TripInput' }
+      responses:
+        '201':
+          description: Trip created
+          headers:
+            Location:
+              description: URL of the new trip
+              schema: { type: string, example: /api/trips/GALR210214 }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Trip' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /trips/{tripCode}:
+    parameters:
+      - $ref: '#/components/parameters/TripCode'
+    get:
+      tags: [Trips]
+      summary: Get one trip
+      operationId: getTrip
+      responses:
+        '200':
+          description: The trip
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Trip' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Trips]
+      summary: Replace a trip (admin only)
+      description: All fields are required. The trip code comes from the URL and cannot be changed.
+      operationId: updateTrip
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TripUpdate' }
+      responses:
+        '200':
+          description: The updated trip
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Trip' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Trips]
+      summary: Delete a trip (admin only)
+      operationId: deleteTrip
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Trip deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /login:
+    post:
+      tags: [Authentication]
+      summary: Log in and receive a token
+      description: |
+        Failed attempts are limited per client address (default 10 per 15
+        minutes; successful logins do not count). A wrong email and a wrong
+        password produce the same response.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginInput' }
+      responses:
+        '200':
+          description: Logged in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /register:
+    post:
+      tags: [Authentication]
+      summary: Create a customer account
+      description: Always creates a `customer`. Limited per client address (default 5 per hour).
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterInput' }
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        HS256-signed token from /login or /register, valid for one hour.
+        Claims: sub (user id), email, name, role, iss = travlr-api, aud = travlr.
+
+  parameters:
+    TripCode:
+      name: tripCode
+      in: path
+      required: true
+      description: 3 to 20 letters or digits (case-insensitive)
+      schema: { type: string, pattern: '^[A-Za-z0-9]{3,20}$', example: GALR210214 }
+
+  schemas:
+    TripFields:
+      type: object
+      required: [name, length, start, resort, perPerson, image, description]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100, example: Gale Reef }
+        length: { type: string, minLength: 1, maxLength: 50, example: 4 nights / 5 days }
+        start: { type: string, format: date-time, example: '2026-02-14T08:00:00Z' }
+        resort: { type: string, minLength: 1, maxLength: 100, example: 'Emerald Bay, 3 stars' }
+        perPerson: { type: string, pattern: '^\d{1,6}(\.\d{1,2})?$', example: '799.00' }
+        image: { type: string, pattern: '^[\w-]{1,80}\.(jpe?g|png|gif|webp)$', example: reef1.jpg }
+        description:
+          type: string
+          minLength: 1
+          maxLength: 5000
+          description: |
+            Limited HTML. Only p, br, b, strong, i, em, u, ul, ol, and li are
+            kept; all attributes and all other tags are removed.
+          example: <p>Snorkel the <strong>Gale Reef</strong>.</p>
+    TripInput:
+      allOf:
+        - $ref: '#/components/schemas/TripFields'
+        - type: object
+          required: [code]
+          properties:
+            code: { type: string, pattern: '^[A-Za-z0-9]{3,20}$', example: GALR210214 }
+    TripUpdate:
+      allOf:
+        - $ref: '#/components/schemas/TripFields'
+        - type: object
+          properties:
+            code:
+              type: string
+              description: Optional. If present it must equal the code in the URL.
+    Trip:
+      allOf:
+        - type: object
+          properties:
+            _id: { type: string, example: 65f0c0ffee0000000000abcd }
+            code: { type: string, example: GALR210214 }
+        - $ref: '#/components/schemas/TripFields'
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 1, maxLength: 1024, format: password }
+    RegisterInput:
+      type: object
+      required: [name, email, password]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 12, maxLength: 128, format: password }
+    TokenResponse:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string }
+    Error:
+      type: object
+      required: [status, code, message]
+      properties:
+        status: { type: integer, example: 404 }
+        code:
+          type: string
+          enum: [VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, RATE_LIMITED, PAYLOAD_TOO_LARGE, INTERNAL_ERROR]
+        message: { type: string, example: Trip GALR210214 not found }
+        details:
+          type: array
+          description: Present on validation errors, one entry per problem field.
+          items:
+            type: object
+            properties:
+              field: { type: string, example: perPerson }
+              message: { type: string, example: perPerson must be a price such as 799 or 799.00 }
+
+  responses:
+    ValidationFailed:
+      description: The request did not pass validation
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing, invalid, or expired token, or wrong credentials
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Authenticated, but the account is not an administrator
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: No trip with that code
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: A trip or account with that identifier already exists
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Too many attempts from this address
+      headers:
+        Retry-After:
+          description: Seconds until requests are accepted again
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InternalError:
+      description: Unexpected server error (details are logged, not returned)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }

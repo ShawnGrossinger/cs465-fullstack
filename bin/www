@@ -1,90 +1,74 @@
 #!/usr/bin/env node
-
+'use strict';
 /**
- * Module dependencies.
+ * Server entry point: load and validate configuration, connect to MongoDB,
+ * build the application, start listening, and shut down cleanly.
  */
+const http = require('http');
+const debug = require('debug')('travlr:server');
 
-var app = require('../app');
-var debug = require('debug')('travlr:server');
-var http = require('http');
+const { loadConfigFromEnvironment } = require('../app_api/config');
+const { connect, disconnect } = require('../app_api/db/connection');
+const { createMongoRepositories } = require('../app_api/repositories');
+const { createApp } = require('../app');
 
-/**
- * Get port from environment and store in Express.
- */
+async function main() {
+    let config;
+    try {
+        config = loadConfigFromEnvironment();
+    } catch (err) {
+        // Refuse to start with missing or unsafe settings.
+        console.error(err.message);
+        process.exit(1);
+    }
 
-var port = normalizePort(process.env.PORT || '3000');
-app.set('port', port);
+    await connect(config.db.uri);
 
-/**
- * Create HTTP server.
- */
+    const app = createApp({ config, repositories: createMongoRepositories() });
+    app.set('port', config.port);
 
-var server = http.createServer(app);
+    const server = http.createServer(app);
+    server.on('error', (error) => onError(error, config.port));
+    server.listen(config.port, () => {
+        debug(`Listening on port ${config.port}`);
+        console.log(`Travlr is running at http://localhost:${config.port}`);
+    });
 
-/**
- * Listen on provided port, on all network interfaces.
- */
-
-server.listen(port);
-server.on('error', onError);
-server.on('listening', onListening);
-
-/**
- * Normalize a port into a number, string, or false.
- */
-
-function normalizePort(val) {
-  var port = parseInt(val, 10);
-
-  if (isNaN(port)) {
-    // named pipe
-    return val;
-  }
-
-  if (port >= 0) {
-    // port number
-    return port;
-  }
-
-  return false;
+    // Graceful shutdown: stop accepting requests, let in-flight ones finish,
+    // then close the database connection. (The original code defined a
+    // shutdown function but never connected it to these signals.)
+    let shuttingDown = false;
+    const shutdown = (signal) => {
+        if (shuttingDown) return;
+        shuttingDown = true;
+        console.log(`${signal} received, shutting down`);
+        server.close(async () => {
+            await disconnect();
+            process.exit(0);
+        });
+        setTimeout(() => process.exit(1), 10000).unref(); // force exit if something hangs
+    };
+    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
-/**
- * Event listener for HTTP server "error" event.
- */
-
-function onError(error) {
-  if (error.syscall !== 'listen') {
-    throw error;
-  }
-
-  var bind = typeof port === 'string'
-    ? 'Pipe ' + port
-    : 'Port ' + port;
-
-  // handle specific listen errors with friendly messages
-  switch (error.code) {
-    case 'EACCES':
-      console.error(bind + ' requires elevated privileges');
-      process.exit(1);
-      break;
-    case 'EADDRINUSE':
-      console.error(bind + ' is already in use');
-      process.exit(1);
-      break;
-    default:
-      throw error;
-  }
+function onError(error, port) {
+    if (error.syscall !== 'listen') throw error;
+    switch (error.code) {
+        case 'EACCES':
+            console.error(`Port ${port} requires elevated privileges`);
+            process.exit(1);
+            break;
+        case 'EADDRINUSE':
+            console.error(`Port ${port} is already in use`);
+            process.exit(1);
+            break;
+        default:
+            throw error;
+    }
 }
 
-/**
- * Event listener for HTTP server "listening" event.
- */
-
-function onListening() {
-  var addr = server.address();
-  var bind = typeof addr === 'string'
-    ? 'pipe ' + addr
-    : 'port ' + addr.port;
-  debug('Listening on ' + bind);
-}
+main().catch((err) => {
+    console.error(`Failed to start: ${err.message}`);
+    process.exit(1);
+});
