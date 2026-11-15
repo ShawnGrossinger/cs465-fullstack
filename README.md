@@ -1,40 +1,44 @@
 # Travlr Getaways — Full Stack Travel Booking Application
 
-A full stack web application built on the **MEAN stack** (MongoDB, Express, Angular, Node.js) for the fictional client Travlr Getaways. The project was developed incrementally across CS 465, from a static customer-facing site through a database-backed REST API to a secured single-page administration application.
+A full stack web application built on the **MEAN stack** (MongoDB, Express, Angular, Node.js) for the fictional client Travlr Getaways. The project was developed incrementally across CS 465, from a static customer-facing site through a database-backed REST API to a secured single-page administration application, and then re-engineered in CS 499 (see [CS 499 Enhancement One](#cs-499-enhancement-one-software-design-and-engineering)).
 
 ## Overview
 
 The application has three tiers that communicate through a single REST API:
 
-- **Customer-facing website** — a server-rendered Express application using the Handlebars (HBS) templating engine. It presents travel content to the public and is optimized for fast first loads.
-- **Administrator single-page application (SPA)** — an Angular application that lets administrators create, read, update, and delete trips without full-page reloads.
-- **REST API and database** — an Express/Mongoose API backed by a MongoDB document database, consumed by both front ends and secured with JSON Web Tokens (JWT).
+- **Customer-facing website** — a server-rendered Express application using the Handlebars (HBS) templating engine.
+- **Administrator single-page application (SPA)** — an Angular application that lets administrators create, read, update, and delete trips.
+- **REST API and database** — an Express API backed by MongoDB through Mongoose, consumed by both front ends and secured with JSON Web Tokens (JWT) and role-based access control.
 
 ## Features
 
 - Server-rendered customer site with reusable Handlebars partials
-- RESTful API exposing trip data as JSON (GET, POST, PUT, DELETE)
-- MongoDB persistence through Mongoose schemas with validation
-- Angular admin SPA with reusable components, reactive forms, and client-side routing
-- JWT-based authentication: admin registration, login, and protected write endpoints
-- Password hashing with a per-user salt (PBKDF2); secrets kept out of source control
+- RESTful API exposing trip data as JSON, documented in OpenAPI 3 (`app_api/openapi.yaml`, served at `/api/openapi.yaml`)
+- Layered API: routes → middleware → controllers → services → repositories
+- Role-based access control: only administrators can create, edit, or delete trips
+- Request validation on every endpoint and allowlist sanitization of trip descriptions
+- PBKDF2-SHA512 password hashing at OWASP's recommended work factor, with automatic upgrade of older hashes
+- Rate limiting on login and registration, security headers (helmet, Content Security Policy), CORS allowlist
+- Angular admin SPA with an administrator route guard and user-facing error messages
+- Automated tests for the API (Jest, Supertest), the database layer, and the Angular app (Jasmine, Karma), run by GitHub Actions on every push
 
 ## Technology Stack
 
 | Tier | Technology |
 |------|-----------|
 | Database | MongoDB, Mongoose ODM |
-| Server | Node.js, Express |
+| Server | Node.js, Express, Joi (validation), helmet, express-rate-limit, sanitize-html |
 | Customer front end | Handlebars (HBS), HTML, CSS |
 | Admin front end | Angular (TypeScript), Bootstrap |
-| Authentication | Passport (local strategy), JSON Web Tokens, Node `crypto` |
+| Authentication | JSON Web Tokens, Node `crypto` (PBKDF2) |
+| Testing and CI | Jest, Supertest, Jasmine, Karma, GitHub Actions |
 
 ## Getting Started
 
 ### Prerequisites
-- Node.js and npm
+- Node.js 20.19+ or 22.12+ (needed to load sanitize-html's HTML parser)
 - MongoDB running locally on the default port (`27017`)
-- Angular CLI (`npm install -g @angular/cli`)
+- Angular CLI (`npm install -g @angular/cli`) for `ng serve`
 
 ### Setup
 ```bash
@@ -44,32 +48,91 @@ npm install
 # 2. Install admin SPA dependencies
 cd app_admin && npm install && cd ..
 
-# 3. Create a .env file in the project root with your own JWT secret
-echo "JWT_SECRET=$(openssl rand -hex 32)" > .env   # .env is git-ignored
+# 3. Create .env from the template and add a JWT secret (.env is git-ignored)
+cp .env.example .env
+echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env
 
-# 4. Seed the database
-node ./app_api/models/seed
+# 4. Seed the trips collection
+npm run seed
+
+# 5. Create an administrator (you will be prompted for a password)
+npm run create-admin -- --email admin@example.com --name "Site Admin"
 ```
 
 ### Running
 ```bash
 # Terminal 1 — Express server (customer site + API) on http://localhost:3000
-DEBUG=travlr:* npm start
+npm start
 
 # Terminal 2 — Angular admin SPA on http://localhost:4200
 cd app_admin && ng serve
 ```
 
+The server checks its configuration at startup and refuses to start with a missing or short `JWT_SECRET` or a weakened password work factor. All settings are listed in `.env.example`.
+
+### Running the tests
+```bash
+npm test               # API, customer site, and unit tests — no database needed
+npm run test:coverage  # same, with a coverage report
+npm run test:db        # repository and full-stack tests against MongoDB
+                       # (uses MONGO_TEST_URI, default mongodb://127.0.0.1:27017/travlr_test;
+                       #  the database name must end in _test because it is wiped)
+cd app_admin && npm test -- --watch=false --browsers=ChromeHeadlessCI   # Angular tests
+```
+
 ## Project Structure
 ```
 travlr/
-├── app_server/     # Customer-facing Express app (routes, controllers, HBS views)
-├── app_api/        # REST API (routes, controllers, Mongoose models, auth config)
-├── app_admin/      # Angular admin SPA (components, services, models, interceptor)
-├── public/         # Static assets for the customer site
-├── data/           # Seed data (trips.json)
-└── app.js          # Express entry point, CORS, and middleware wiring
+├── app.js                 # createApp(): wires the layers and security middleware together
+├── bin/www                # entry point: config check, DB connect, start, graceful shutdown
+├── app_api/
+│   ├── config/            # validated configuration from the environment
+│   ├── routes/            # endpoint → middleware pipeline
+│   ├── middleware/        # authenticate, requireRole, validate, rate limits, error handler
+│   ├── controllers/       # HTTP in / HTTP out only
+│   ├── services/          # business rules, passwords, tokens
+│   ├── repositories/      # the only code that talks to MongoDB
+│   ├── validation/        # Joi request schemas
+│   ├── models/            # Mongoose schemas and the seed script
+│   ├── db/                # connection management
+│   ├── utils/             # error types, sanitizer, structured logger
+│   └── openapi.yaml       # API documentation
+├── app_server/            # customer website (routes, controllers, HBS views)
+├── app_admin/             # Angular admin SPA
+├── scripts/create-admin.js
+├── tests/                 # api/, site/, unit/, db/, support/
+├── .github/workflows/     # CI pipeline
+├── public/                # static assets for the customer site
+└── data/                  # seed data (trips.json)
 ```
+
+## CS 499 Enhancement One: Software Design and Engineering
+
+A code review of the CS 465 version found design flaws that were also security vulnerabilities. Each one is listed below with its fix and the tests that keep it fixed.
+
+| Finding in the original | Change | Verified by |
+|---|---|---|
+| Anyone could call `/api/register` and the token it returned could create, edit, and delete trips (no roles) | `role` on users; trip writes require `admin`, re-checked against the database on every write; registration creates customers only; `npm run create-admin` | `tests/api/accessControl.test.js` |
+| Trip descriptions were stored without validation and rendered unescaped (`{{{this.description}}}`), so a script in a description ran on the public travel page | Joi validation strips unknown fields and checks every value; descriptions pass an HTML allowlist when saved **and** when rendered; Content Security Policy | `tests/api/trips.test.js`, `tests/site/travel.test.js` |
+| PBKDF2 at 1,000 iterations, synchronous (blocks the event loop), compared with `===` | 220,000 iterations (OWASP), async hashing, `crypto.timingSafeEqual`, per-user work factor with upgrade at next login, equal-time response for unknown accounts | `tests/api/auth.test.js`, `tests/unit/services.test.js` |
+| No limit on login attempts | Rate limits on `/login` (failed attempts only) and `/register` | `tests/api/auth.test.js` |
+| Controllers mixed HTTP, validation, and queries; inconsistent responses (`err` undefined, 200 + `[]` for a missing trip, 201 + old document on update) | Layered architecture, central error handler with one JSON error shape, correct status codes | `tests/api/trips.test.js`, `tests/api/hardening.test.js` |
+| Hard-coded URLs and CORS origin; database connected as a side effect of `require`; shutdown handler never called | Validated config module, explicit connection management, graceful shutdown on SIGINT/SIGTERM | `tests/unit/services.test.js` |
+| Admin app: no route guards, trip code passed through `localStorage`, token sent with every request, errors only logged | `adminGuard`, `edit-trip/:tripCode`, token sent only to the API, sign-out on 401, safe `returnUrl`, error messages | `app_admin/src/**/*.spec.ts` |
+| No automated tests (the 8 generated Angular specs all failed) | 77 server-side tests, database integration tests, 41 Angular tests, GitHub Actions | CI |
+| `npm audit`: 3 critical, 2 high, 2 moderate advisories | Updated dependencies; one moderate advisory remains (see below) | CI audit step |
+
+### Upgrading an existing installation
+- **Promote your existing account**, or it will be treated as a customer: `npm run create-admin -- --email you@example.com --promote`
+- **Log in again.** Tokens now carry an issuer, audience, and role, so tokens issued by the old version are rejected.
+- Passwords created by the old version keep working and are rehashed at the stronger work factor on the next login.
+- API changes for any other client: `GET /api/trips/{code}` returns one object (404 if missing); `PUT` returns 200 with the updated trip; `DELETE` returns 204; `POST /api/register` returns 201. See `app_api/openapi.yaml`.
+
+### Known issues and risk decisions
+- **hbs (moderate, GHSA-7f5c-rpf4-86p8, no patch exists).** The issue requires request data to reach `res.render()` options. Travlr only renders fixed objects built in its own controllers, so it is not exposed. Replacing the view engine is noted for future work.
+- **Angular 19 is past end of support.** `npm audit` in `app_admin` reports high-severity advisories whose fixes exist only in Angular 20+. Most concern features this app does not use (server-side rendering, hydration, i18n), but the right fix is a framework upgrade, planned as follow-up work.
+- **sanitize-html is kept at the latest version (2.18.2)** because earlier versions have XSS bypass advisories. Its parser is published only as an ES module, so Node 20.19+/22.12+ is required, and Jest transpiles that one dependency (`tests/support/jest.shared.js`).
+- **Tokens are stored in `localStorage`**, as in the original design. The new Content Security Policy and sanitization reduce the XSS risk that makes this dangerous; moving to an HttpOnly cookie would also require CSRF protection and is noted for future work.
 
 ---
 
