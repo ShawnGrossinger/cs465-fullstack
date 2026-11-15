@@ -36,10 +36,8 @@ jobs:
       - name: Database integration tests
         run: npm run test:db
       - name: Audit production dependencies
-        # Reported but not blocking: Angular 19 is past end of support and its
-        # remaining advisories are fixed only in Angular 20+ (see README,
-        # "Known issues"). Remove continue-on-error after the upgrade.
-        continue-on-error: true
+        # Fails on high or critical advisories. The one known moderate advisory
+        # (hbs, no patch available) is assessed in the README.
         run: npm audit --omit=dev --audit-level=high
 
   admin:
@@ -61,4 +59,8 @@ jobs:
       - name: Production build
         run: npx ng build
       - name: Audit production dependencies
+        # Reported but not blocking: Angular 19 is past end of support and its
+        # remaining advisories are fixed only in Angular 20+ (see README,
+        # "Known issues"). Remove continue-on-error after the upgrade.
+        continue-on-error: true
         run: npm audit --omit=dev --audit-level=high
