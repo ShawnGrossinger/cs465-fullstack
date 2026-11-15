@@ -1,0 +1,62 @@
+# Continuous integration: every push and pull request runs the API tests
+# (with and without a database), the Angular tests and build, and a
+# dependency vulnerability audit for both applications.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  api:
+    name: API tests and audit
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      MONGO_TEST_URI: mongodb://127.0.0.1:27017/travlr_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Unit and API tests (no database)
+        run: npm run test:coverage
+      - name: Database integration tests
+        run: npm run test:db
+      - name: Audit production dependencies
+        # Fails on high or critical advisories. The one known moderate advisory
+        # (hbs, no patch available) is assessed in the README.
+        run: npm audit --omit=dev --audit-level=high
+
+  admin:
+    name: Angular admin tests, build, and audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app_admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app_admin/package-lock.json
+      - run: npm ci
+      - name: Unit tests (headless Chrome)
+        run: npm test -- --watch=false --browsers=ChromeHeadlessCI
+      - name: Production build
+        run: npx ng build
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
