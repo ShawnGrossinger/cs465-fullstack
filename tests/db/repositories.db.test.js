@@ -25,7 +25,16 @@ beforeAll(async () => {
     if (!dbName.endsWith('_test')) {
         throw new Error(`Refusing to run: database "${dbName}" does not end in _test (it would be wiped)`);
     }
-    await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 });
+    await mongoose.connect(uri, {
+        serverSelectionTimeoutMS: 5000,
+        // MongoDB driver 7.8+ loads Node's os module with a dynamic import(), which
+        // Jest's sandbox cannot run. The failure is swallowed, the handshake goes out
+        // without its required "driver" metadata, and the server rejects it with
+        // "Missing required sub-document 'driver'". Handing the driver the os module
+        // directly avoids the dynamic import. (The app itself runs under plain Node,
+        // where the import works, so only the tests need this.)
+        runtimeAdapters: { os: require('os') },
+    });
     await Promise.all([Trip.init(), User.init()]); // make sure indexes (unique email) exist
     repos = createMongoRepositories();
 });
