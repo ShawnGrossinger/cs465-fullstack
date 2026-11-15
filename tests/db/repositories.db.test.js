@@ -27,7 +27,7 @@ beforeAll(async () => {
     }
     await mongoose.connect(uri, {
         serverSelectionTimeoutMS: 5000,
-        // MongoDB driver 7.8+ loads Node's os module with a dynamic import(), which
+        // The MongoDB driver used by Mongoose 9 loads the os module with a dynamic import(), which
         // Jest's sandbox cannot run. The failure is swallowed, the handshake goes out
         // without its required "driver" metadata, and the server rejects it with
         // "Missing required sub-document 'driver'". Handing the driver the os module
